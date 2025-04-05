@@ -47,6 +47,21 @@ _ops = scan_params.ops
 
 @decorator_logger(logger, log_head='Request', pretty=True, indent=2, verbose=1)
 def auth(request):
+    """
+    授权页面
+    """
+    redirect_to = request.GET.get('redirect', 'resetPassword')
+    
+    context = {
+        'global_title': TITLE,
+        'app_type': APP_TYPE,
+        'corp_id': WEWORK_CORP_ID if APP_TYPE == 'WEWORK' else DING_CORP_ID,
+        'agent_id': WEWORK_AGENT_ID if APP_TYPE == 'WEWORK' else DING_AGENT_ID,
+        'app_id': WEWORK_CORP_ID if APP_TYPE == 'WEWORK' else DING_CORP_ID,
+        'redirect_url': request.build_absolute_uri(f'/{redirect_to}'),
+    }
+    return render(request, 'auth.html', context)
+
     home_url = '%s://%s' % (request.scheme, HOME_URL)
     corp_id = scan_params.corp_id
     app_id = scan_params.app_id
@@ -303,3 +318,115 @@ def messages(request):
         'button_display': button_display
     }
     return render(request, msg_template, context)
+
+
+def chat_page(request):
+    """
+    聊天页面，需要企业微信授权
+    """
+    context = {
+        'global_title': TITLE,
+        'app_type': APP_TYPE,
+    }
+    
+    # 获取code参数
+    code = request.GET.get('code')
+    if not code:
+        # 如果没有code，重定向到授权页面
+        return redirect('/auth?redirect=chat')
+    
+    # 使用企业微信API获取用户信息
+    wework = WeWorkOps()
+    status, user_id, user_info = wework.get_user_detail(code, '/')
+    
+    if not status:
+        # 如果获取用户信息失败，显示错误信息
+        if isinstance(user_id, dict):
+            context.update(user_id)
+            return render(request, 'messages.html', context)
+        context.update({
+            'msg': '获取用户信息失败',
+            'button_click': "window.location.href='/'",
+            'button_display': "返回主页"
+        })
+        return render(request, 'messages.html', context)
+    
+    # 生成一个新的chatId
+    import uuid
+    chat_id = f"chat_{uuid.uuid4().hex}"
+    
+    # 将用户信息和chatId添加到上下文
+    context.update({
+        'userId': user_id,
+        'chatId': chat_id,
+        'code': code,
+        'username': user_info.get('name', user_id)
+    })
+    
+    return render(request, 'chat.html', context)
+
+@require_POST
+@csrf_exempt
+def chat_send(request):
+    """
+    处理聊天消息发送
+    """
+    try:
+        message = request.POST.get('message')
+        chat_id = request.POST.get('chatId')
+        user_id = request.POST.get('userId')
+        
+        if not all([message, chat_id, user_id]):
+            return JsonResponse({
+                'success': False,
+                'message': '参数不完整'
+            })
+        
+        # 调用FastGPT API
+        headers = {
+            'Authorization': f'Bearer {FASTGPT_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'chatId': chat_id,
+            'stream': False,
+            'detail': False,
+            'variables': {
+                'userId': user_id
+            },
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': message
+                }
+            ]
+        }
+        
+        response = requests.post(
+            f'{FASTGPT_API_URL}/api/v1/chat/completions',
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            content = data['choices'][0]['message']['content']
+            
+            return JsonResponse({
+                'success': True,
+                'data': {
+                    'content': content
+                }
+            })
+        else:
+            return JsonResponse({
+                'success': False,
+                'message': f'API请求失败: {response.status_code}'
+            })
+            
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'处理请求时出错: {str(e)}'
+        })

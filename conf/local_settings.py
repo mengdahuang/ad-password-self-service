@@ -72,3 +72,9 @@ TITLE = 'Self-Service'
 # ####### Redis ##########
 REDIS_LOCATION = r'127.0.0.1:6379'
 REDIS_PASSWORD = r'PWD_SELF_REDIS_PASSWORD'
+
+
+# FastGPT API配置
+FASTGPT_API_KEY = 'fastgpt-xxxxxx'  # 替换为您的API密钥
+FASTGPT_APP_ID = 'your_app_id'      # 替换为您的应用ID
+FASTGPT_API_URL = 'https://api.fastgpt.in'  # FastGPT API地址
