@@ -320,6 +320,16 @@ def messages(request):
     return render(request, msg_template, context)
 
 
+# 添加必要的导入
+import json
+import uuid
+import requests
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from utils.wework_ops import WeWorkOps
+from conf.local_settings import FASTGPT_API_KEY, FASTGPT_APP_ID, FASTGPT_API_URL, TITLE, APP_TYPE
+
 def chat_page(request):
     """
     聊天页面，需要企业微信授权
@@ -336,8 +346,14 @@ def chat_page(request):
         return redirect('/auth?redirect=chat')
     
     # 使用企业微信API获取用户信息
-    wework = WeWorkOps()
-    status, user_id, user_info = wework.get_user_detail(code, '/')
+    if APP_TYPE == 'WEWORK':
+        wework = WeWorkOps()
+        status, user_id, user_info = wework.get_user_detail(code, '/')
+    else:
+        # 钉钉处理逻辑
+        from utils.dingding_ops import DingDingOps
+        ding = DingDingOps()
+        status, user_id, user_info = ding.get_user_detail(code, '/')
     
     if not status:
         # 如果获取用户信息失败，显示错误信息
@@ -352,21 +368,18 @@ def chat_page(request):
         return render(request, 'messages.html', context)
     
     # 生成一个新的chatId
-    import uuid
     chat_id = f"chat_{uuid.uuid4().hex}"
     
     # 将用户信息和chatId添加到上下文
     context.update({
         'userId': user_id,
         'chatId': chat_id,
-        'code': code,
         'username': user_info.get('name', user_id)
     })
     
     return render(request, 'chat.html', context)
 
 @require_POST
-@csrf_exempt
 def chat_send(request):
     """
     处理聊天消息发送
@@ -375,6 +388,7 @@ def chat_send(request):
         message = request.POST.get('message')
         chat_id = request.POST.get('chatId')
         user_id = request.POST.get('userId')
+        username = request.POST.get('username')
         
         if not all([message, chat_id, user_id]):
             return JsonResponse({
@@ -391,9 +405,10 @@ def chat_send(request):
         payload = {
             'chatId': chat_id,
             'stream': False,
-            'detail': False,
+            'detail': True,  # 获取详细信息
             'variables': {
-                'userId': user_id
+                'uid': user_id,
+                'name': username
             },
             'messages': [
                 {
@@ -406,26 +421,37 @@ def chat_send(request):
         response = requests.post(
             f'{FASTGPT_API_URL}/api/v1/chat/completions',
             headers=headers,
-            json=payload
+            json=payload,
+            timeout=30  # 设置超时时间
         )
         
         if response.status_code == 200:
             data = response.json()
-            content = data['choices'][0]['message']['content']
             
-            return JsonResponse({
-                'success': True,
-                'data': {
-                    'content': content
-                }
-            })
+            # 从响应中提取内容
+            if 'choices' in data and len(data['choices']) > 0:
+                content = data['choices'][0]['message']['content']
+                
+                return JsonResponse({
+                    'success': True,
+                    'data': {
+                        'content': content
+                    }
+                })
+            else:
+                return JsonResponse({
+                    'success': False,
+                    'message': '无法获取AI回复内容'
+                })
         else:
             return JsonResponse({
                 'success': False,
-                'message': f'API请求失败: {response.status_code}'
+                'message': f'API请求失败: {response.status_code} - {response.text}'
             })
             
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JsonResponse({
             'success': False,
             'message': f'处理请求时出错: {str(e)}'

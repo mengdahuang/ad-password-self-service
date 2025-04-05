@@ -1,6 +1,13 @@
 {% extends 'base.html' %}
 {% load static %}
-{% block headerjs %}<script type="text/javascript" src="{% static 'js/dingtalk.open.js' %}"></script>{% endblock %}
+{% block headerjs %}
+{% if app_type == 'WEWORK' %}
+<script src="https://open.work.weixin.qq.com/wwopen/js/jwxwork-1.0.0.js"></script>
+{% else %}
+<script type="text/javascript" src="{% static 'js/dingtalk.open.js' %}"></script>
+{% endif %}
+{% endblock %}
+
 {% block paneltitle %}智能对话{% endblock %}
 {% block middleblock %}
 <div class="layui-row">
@@ -8,7 +15,7 @@
         <div class="chat-messages" id="chatMessages">
             <!-- 消息将在这里动态添加 -->
             <div class="welcome-message">
-                <p>您好，我是您的智能助手，请问有什么可以帮助您？</p>
+                <p>您好，{{ username }}，我是您的智能助手，请问有什么可以帮助您？</p>
             </div>
         </div>
         <div class="chat-input-area">
@@ -16,9 +23,9 @@
                 <div class="layui-form-item">
                     <div class="layui-input-block">
                         <input type="text" name="message" id="messageInput" lay-verify="required" lay-verType="tips" autocomplete="off" placeholder="请输入您的问题" class="layui-input">
-                        <input type="hidden" id="code" name="code" readonly value="{{ code }}">
-                        <input type="hidden" id="chatId" name="chatId" readonly value="{{ chatId }}">
                         <input type="hidden" id="userId" name="userId" readonly value="{{ userId }}">
+                        <input type="hidden" id="username" name="username" readonly value="{{ username }}">
+                        <input type="hidden" id="chatId" name="chatId" readonly value="{{ chatId }}">
                     </div>
                 </div>
                 <div class="layui-form-item">
@@ -85,11 +92,24 @@
         color: #999;
         margin: 20px 0;
     }
+    .markdown-content p {
+        margin-bottom: 10px;
+    }
+    .markdown-content pre {
+        background-color: #f0f0f0;
+        padding: 10px;
+        border-radius: 4px;
+        overflow-x: auto;
+    }
+    .markdown-content code {
+        font-family: monospace;
+    }
 </style>
 {% endblock %}
 
 {% block footerjs %}
 <script src="{% static 'layui/layui.js' %}"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 layui.use(['form', 'jquery', 'layer'], function () {
     let layer = layui.layer,
@@ -97,6 +117,7 @@ layui.use(['form', 'jquery', 'layer'], function () {
     
     let chatId = $('#chatId').val() || generateChatId();
     let userId = $('#userId').val();
+    let username = $('#username').val();
     
     // 如果没有chatId，则生成一个并设置到隐藏字段
     if (!$('#chatId').val()) {
@@ -111,7 +132,15 @@ layui.use(['form', 'jquery', 'layer'], function () {
     // 添加消息到聊天界面
     function addMessage(content, isUser) {
         let messageDiv = $('<div class="message ' + (isUser ? 'user-message' : 'assistant-message') + '"></div>');
-        messageDiv.text(content);
+        
+        if (!isUser) {
+            // 使用marked.js渲染Markdown内容
+            messageDiv.html(marked.parse(content));
+            messageDiv.addClass('markdown-content');
+        } else {
+            messageDiv.text(content);
+        }
+        
         $('#chatMessages').append(messageDiv);
         // 滚动到底部
         $('#chatMessages').scrollTop($('#chatMessages')[0].scrollHeight);
@@ -139,6 +168,7 @@ layui.use(['form', 'jquery', 'layer'], function () {
                 'message': message,
                 'chatId': chatId,
                 'userId': userId,
+                'username': username,
                 'csrfmiddlewaretoken': $('input[name=csrfmiddlewaretoken]').val()
             },
             success: function(response) {
